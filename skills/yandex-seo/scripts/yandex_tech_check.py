@@ -307,6 +307,15 @@ def check(url, indexnow_key=None):
     # ── Зеркала и редиректы
     G = 'Зеркала и редиректы'
     st, final, hdr, body, chain = fetch(main)
+    if st == 0 and p.scheme == 'https':
+        # https не открылся — пробуем http: частая история у сайтов застройщиков, и это само по себе критично
+        alt = f'http://{p.netloc}/'
+        st2, final2, hdr2, body2, chain2 = fetch(alt)
+        if st2 == 200 and urllib.parse.urlsplit(final2).scheme == 'http':
+            R.add(G, BAD, f'HTTPS не работает ({body[:80]}), сайт открывается только по http',
+                  'выпустить SSL-сертификат (Let’s Encrypt бесплатно) и сделать 301 с http на https: браузеры и Яндекс помечают сайт как небезопасный')
+            st, final, hdr, body, chain = st2, final2, hdr2, body2, chain2
+            main = alt
     if st != 200:
         R.add(G, BAD, f'Главная {main} отдаёт {st or "ошибку соединения"}', 'главная должна отдавать 200')
         return R, {}
