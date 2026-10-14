@@ -1,56 +1,79 @@
 # yandex-seo — SEO под Яндекс для Claude Code
 
-**Первый скил для агентов, который знает Яндекс.** Популярные SEO-скилы для Claude Code работают под Google и нейропоисковики — Вордстата, Вебмастера, коммерческих факторов и Яндекс Карт там нет. А в России большая часть поиска — это Яндекс.
+> **Не очередной клиент к API Вордстата, а порядок SEO-работы под Яндекс: от спроса до отчёта P0/P1/P2.** Работает без ключей API.
 
-Этот скил — порядок работы, который мы прошли на живом запуске сайта студии: от технической проверки и семантики до Вебмастера, IndexNow и локальной выдачи.
+[English version](README.en.md) · [Пример на реальном сайте](examples/shatinadesign-ru.md) · [Изменения](CHANGELOG.md)
 
-## Что умеет
+Популярные SEO-скилы для Claude Code сделаны под Google и нейропоисковики. Вордстата, Вебмастера, коммерческих факторов, Яндекс Карт и Нейро там нет. А в России большая часть поиска — это Яндекс.
 
-| Шаг | Что делает |
-|---|---|
-| **Техника** | Скрипт без зависимостей проверяет зеркала и цепочки редиректов, честную 404, robots.txt (Clean-param, устаревший Host), sitemap и выборку адресов из него, мета-теги, Schema.org, текст и ссылки до выполнения JS (боль React/Vue-сайтов), Метрику, подтверждение Вебмастера, коммерческие сигналы, ключ IndexNow |
-| **Вордстат** | Операторы, регионы и главное — **интент**: кто ищет, заказчик или покупатель. «Сайт ЖК» — 127 000 показов, но это покупатели квартир, а не застройщики |
-| **Выдача** | Как снимать топ без рекламы в нужном регионе, колдунщики, что из выдачи следует для типа страницы |
-| **Коммерческие факторы** | Чек-лист: реквизиты, цены, способы связи, доверие, оформление |
-| **Вебмастер** | Подтверждение, sitemap, регион, переезд домена, переобход, ИКС, Метрика |
-| **Локальная выдача** | Яндекс Бизнес без домашнего адреса, Карты, 2ГИС, агрегаторы |
-| **Закон** | 152-ФЗ, cookie и Метрика после согласия, трансграничная передача, реклама |
-| **Агент в браузере** | Готовые задания для Claude в Chrome: Вордстат, выдача, Вебмастер |
-
-На выходе — план P0/P1/P2: что именно сделать в коде или кабинете и как проверить.
+Этот скил — методика, которую мы прошли на живом запуске сайта студии. За два дня мобильная скорость главной выросла с **24 до 95**, исчезли мягкие 404, главная перестала быть «пустой» для робота после загрузки JS, а семантика показала, что запрос на 127 000 показов ищут вовсе не наши клиенты. Подробно — в [примере](examples/shatinadesign-ru.md).
 
 ## Установка
 
+**Плагином Claude Code** (рекомендуется — появятся команды `/yandex`):
+```
+/plugin marketplace add OWNER/yandex-seo-skill
+/plugin install yandex-seo@yandex-seo
+```
+
+**Только скил:**
 ```bash
-git clone https://github.com/<user>/yandex-seo-skill.git
+npx skills add OWNER/yandex-seo-skill
+```
+
+**Вручную:**
+```bash
+git clone https://github.com/OWNER/yandex-seo-skill.git
 cd yandex-seo-skill && ./install.sh
 ```
 
-Или вручную: скопируй папку `yandex-seo` в `~/.claude/skills/`.
+Скрипты работают на Python 3.9+ и стандартной библиотеке — ничего доустанавливать не нужно.
 
-Скрипты работают на Python 3.9+ и стандартной библиотеке — ничего ставить не нужно.
+## Команды
 
-## Использование
+| Команда | Что делает |
+|---|---|
+| `/yandex demand <запросы>` | Спрос в Вордстате: частотность (широкая и в кавычках, Россия и регион), подзапросы, **интент — заказчик или покупатель**, кластеры |
+| `/yandex serp <запросы>` | Выдача Яндекса без рекламы в нужном регионе, колдунщики, конкуренты, какой тип страницы ранжируется |
+| `/yandex commercial <сайт>` | Коммерческие факторы: реквизиты, цены, способы связи, доверие — есть / нет / незаметно |
+| `/yandex tech <сайт>` | Техпроверка скриптом: зеркала и редиректы, 404, robots.txt, sitemap, мета, Schema.org, контент без JS, Метрика, IndexNow |
+| `/yandex neuro <сайт>` | Готовность страниц стать источником для Яндекс Нейро и Алисы |
+| `/yandex report` | Сводка всего собранного в план P0/P1/P2 + контент |
+| `/yandex full <сайт>` | Все шаги по порядку |
 
-В Claude Code:
+Можно и без команд: «Сделай SEO-аудит под Яндекс для https://example.ru».
+
+## Без ключей API
+
+Не все готовы возиться с OAuth Яндекса — поэтому скил по умолчанию работает без него:
+- **техника** — скрипт `yandex_tech_check.py`, ему нужен только адрес сайта;
+- **Вордстат, выдача, Вебмастер** — готовые задания для агента в браузере (Claude в Chrome): скил выдаёт текст задания, агент снимает цифры, отчёт возвращается в чат;
+- **капча** — агент не проходит её за пользователя: останавливается и сообщает.
+
+Если данные нужны быстрее и точнее — подключите MCP-сервер Яндекса, и скил возьмёт цифры оттуда. Например: [stufently/yandex-mcp](https://github.com/stufently/yandex-mcp) (Search, Wordstat, Webmaster, Metrika) или [askads/mcp-yandex-wordstat](https://github.com/askads/mcp-yandex-wordstat). Мы не конкурируем с ними: они дают данные, этот скил — что с ними делать.
+
+## Что внутри
 
 ```
-Сделай SEO-аудит под Яндекс для https://example.ru
-```
-```
-Собери семантику под Яндекс для студии веб-дизайна в Самаре
+skills/yandex-seo/
+  SKILL.md                    порядок работы в 7 шагов и правила честности
+  references/
+    wordstat.md               операторы, регионы, интент, кластеры
+    serp.md                   разбор выдачи без рекламы, колдунщики
+    commercial-factors.md     чек-лист коммерческих факторов
+    technical.md              зеркала, 404, robots, SPA, скорость, IndexNow
+    webmaster.md              подтверждение, переезд, регион, переобход, ИКС, Метрика
+    local.md                  Яндекс Бизнес без домашнего адреса, Карты, 2ГИС
+    neuro.md                  Яндекс Нейро и Алиса
+    ru-legal.md               152-ФЗ, cookie, РКН, реклама
+  templates/                  задания для агента в браузере
+  scripts/
+    yandex_tech_check.py      техпроверка без зависимостей
+    indexnow.py               отправка адресов в IndexNow
+commands/yandex.md            команды /yandex …
 ```
 
-Отдельно скрипты:
-
-```bash
-python3 yandex-seo/scripts/yandex_tech_check.py https://example.ru
-python3 yandex-seo/scripts/indexnow.py --new-key
-python3 yandex-seo/scripts/indexnow.py --host example.ru --key <ключ> --sitemap https://example.ru/sitemap.xml
-```
-
-Пример вывода проверки:
-
+Пример вывода `yandex_tech_check.py`:
 ```
 ■ Зеркала и редиректы
   ✅ http://example.ru/ → 301 → главное зеркало
@@ -65,27 +88,18 @@ python3 yandex-seo/scripts/indexnow.py --host example.ru --key <ключ> --site
 ```
 
 ## Принципы
-
 - Частотность — только из Вордстата, с периодом и регионом. Нет данных — «нет данных».
-- Капчи за пользователя не проходим, защиту сервисов не обходим.
+- Капчи не проходим, защиту сервисов не обходим.
 - Никаких накруток, фейковых отзывов и обещаний «топ-1 за месяц».
 - Ничего не публикуем от имени бизнеса без явного «да» владельца.
 
 ## Вместе с другими скилами
-
-Скил закрывает Яндекс. Для Google и нейропоисковиков хорошо дополняют:
-[claude-seo](https://github.com/AgriciDaniel/claude-seo), [geo-seo-claude](https://github.com/zubair-trabzada/geo-seo-claude), [marketingskills](https://github.com/coreyhaines31/marketingskills).
+Скил закрывает Яндекс. Для Google и нейропоисковиков хорошо дополняют [claude-seo](https://github.com/AgriciDaniel/claude-seo), [geo-seo-claude](https://github.com/zubair-trabzada/geo-seo-claude) и [marketingskills](https://github.com/coreyhaines31/marketingskills).
 
 ## Авторы
+Сделано в [Шатиной студии](https://shatinadesign.ru) — сайты под ключ на Tilda и на коде. Нужен разбор руками — [бриф за 3 минуты](https://shatinadesign.ru/strategiya/).
 
-Сделано в [Шатиной студии](https://shatinadesign.ru) — сайты под ключ на Tilda и на коде. Нашли ошибку или знаете фишку Яндекса, которой тут нет, — открывайте issue или PR.
-
----
-
-## English
-
-**yandex-seo** is a Claude Code skill for SEO in Yandex, the dominant search engine in Russia. Most agent SEO skills target Google and AI search only; this one covers Yandex Wordstat (keyword volumes and intent), Yandex SERP analysis, commercial ranking factors, Yandex Webmaster (verification, site move, region, recrawl), IndexNow, Yandex Business/Maps for local search and Russian legal requirements (152-FZ, cookie consent). Includes a dependency-free Python tech checker and IndexNow sender, plus ready-made tasks for browser agents. Content is in Russian.
+Нашли ошибку или знаете фишку Яндекса, которой тут нет, — открывайте issue или PR.
 
 ## Лицензия
-
 MIT

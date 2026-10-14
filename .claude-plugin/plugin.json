@@ -1,0 +1,10 @@
+{
+  "name": "yandex-seo",
+  "version": "0.1.0",
+  "description": "SEO под Яндекс для Claude Code: Вордстат и интент, выдача, коммерческие факторы, Вебмастер, IndexNow, Яндекс Бизнес, Нейро и Алиса, 152-ФЗ. Порядок работы до плана P0/P1/P2, работает без ключей API.",
+  "author": { "name": "Шатина студия", "url": "https://shatinadesign.ru" },
+  "homepage": "https://shatinadesign.ru",
+  "repository": "https://github.com/OWNER/yandex-seo-skill",
+  "license": "MIT",
+  "keywords": ["seo", "yandex", "яндекс", "wordstat", "вордстат", "webmaster", "вебмастер", "indexnow", "russian", "local-seo"]
+}

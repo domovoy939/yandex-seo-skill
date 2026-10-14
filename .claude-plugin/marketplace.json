@@ -1,0 +1,16 @@
+{
+  "name": "yandex-seo",
+  "description": "SEO под Яндекс для Claude Code: методика от спроса в Вордстате до плана P0/P1/P2.",
+  "owner": {
+    "name": "Шатина студия",
+    "url": "https://shatinadesign.ru"
+  },
+  "plugins": [
+    {
+      "name": "yandex-seo",
+      "source": "./",
+      "description": "SEO под Яндекс: Вордстат и интент, выдача, коммерческие факторы, Вебмастер, IndexNow, Яндекс Бизнес, Нейро и Алиса.",
+      "version": "0.1.0"
+    }
+  ]
+}

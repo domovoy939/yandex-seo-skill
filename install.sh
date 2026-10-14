@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Ставит скил yandex-seo в ~/.claude/skills. Ничего не скачивает и не ставит зависимостей.
 set -euo pipefail
-SRC="$(cd "$(dirname "$0")" && pwd)/yandex-seo"
+SRC="$(cd "$(dirname "$0")" && pwd)/skills/yandex-seo"
 DST="${HOME}/.claude/skills/yandex-seo"
 mkdir -p "${HOME}/.claude/skills"
 rm -rf "$DST"
