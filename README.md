@@ -92,7 +92,7 @@ commands/yandex.md            команды /yandex …
 ```bash
 python3 -m unittest discover tests
 ```
-Нашли дыру — напишите нам напрямую, а не в публичный issue.
+Нашли дыру — напишите нам напрямую через контакты на [shatinadesign.ru](https://shatinadesign.ru/kontakty/), а не в публичный issue.
 
 ## Принципы
 - Частотность — только из Вордстата, с периодом и регионом. Нет данных — «нет данных».
