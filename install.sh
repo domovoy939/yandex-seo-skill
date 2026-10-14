@@ -3,6 +3,7 @@
 set -euo pipefail
 SRC="$(cd "$(dirname "$0")" && pwd)/skills/yandex-seo"
 DST="${HOME}/.claude/skills/yandex-seo"
+[ -f "$SRC/SKILL.md" ] || { echo "Не нашёл $SRC/SKILL.md — запусти скрипт из папки репозитория"; exit 1; }
 mkdir -p "${HOME}/.claude/skills"
 rm -rf "$DST"
 cp -R "$SRC" "$DST"

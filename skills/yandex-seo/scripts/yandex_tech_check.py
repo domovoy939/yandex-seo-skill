@@ -11,54 +11,171 @@ sitemap и выборку адресов из него, мета-теги и р�
 подтверждение Вебмастера, Метрику, сигналы коммерческих факторов, ключ IndexNow.
 """
 import argparse
+import http.client
+import ipaddress
 import json
 import re
 import secrets
+import socket
 import ssl
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 
-UA = 'Mozilla/5.0 (compatible; yandex-seo-check/1.0; +https://github.com/shatinadesign/yandex-seo-skill)'
-TIMEOUT = 20
+UA = 'Mozilla/5.0 (compatible; yandex-seo-check/1.0; +https://github.com/OWNER/yandex-seo-skill)'
+TIMEOUT = 20          # на одно соединение и одно чтение
+BUDGET = 150          # на всю проверку целиком, секунд — медленный сервер не растянет её на часы
 OK, WARN, BAD, INFO = 'ok', 'warn', 'bad', 'info'
 ICON = {OK: '✅', WARN: '⚠️ ', BAD: '❌', INFO: 'ℹ️ '}
 
+# Кого можно открывать, даже если это адрес в локальной сети: только хост, который ввёл сам
+# пользователь (проверить свой стенд на localhost — нормально), и его прокси. Всё остальное —
+# зеркала, редиректы, sitemap из robots.txt — должно вести в интернет.
+TRUSTED = set()
+DEADLINE = [0.0]
+
+
+def _proxy_hosts():
+    hosts = set()
+    for v in urllib.request.getproxies().values():
+        h = urllib.parse.urlsplit(v if '://' in v else 'http://' + v).hostname
+        if h:
+            hosts.add(h)
+    return hosts
+
+
+def _left():
+    return DEADLINE[0] - time.monotonic() if DEADLINE[0] else TIMEOUT
+
+
+def _resolve(host, port):
+    """Резолвим один раз и подключаемся именно к проверенному IP — так подмена DNS между
+    проверкой и подключением (DNS rebinding) не сработает."""
+    infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    if host not in TRUSTED:
+        for info in infos:
+            ip = ipaddress.ip_address(info[4][0].split('%')[0])
+            if not ip.is_global:
+                raise OSError(f'{host} ведёт во внутреннюю сеть ({ip}) — не открываю')
+    return infos[0][4][0]
+
+
+def _via_proxy(url):
+    parts = urllib.parse.urlsplit(url)
+    proxies = urllib.request.getproxies()
+    return parts.scheme in proxies and not urllib.request.proxy_bypass(parts.hostname or '')
+
+
+def _pinned(address, timeout=None, source_address=None):
+    host, port = address
+    ip = _resolve(host, port)
+    return socket.create_connection((ip, port), min(timeout or TIMEOUT, max(1, _left())), source_address)
+
+
+class _HTTPConn(http.client.HTTPConnection):
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self._create_connection = _pinned
+
+
+class _HTTPSConn(http.client.HTTPSConnection):
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self._create_connection = _pinned   # TLS и SNI остаются по имени хоста, подключение — по проверенному IP
+
+
+class _HTTP(urllib.request.HTTPHandler):
+    def http_open(self, req):
+        return self.do_open(_HTTPConn, req)
+
+
+class _HTTPS(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_HTTPSConn, req, context=ssl.create_default_context())
+
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
+    # редиректы разбираем сами, по одному прыжку, чтобы видеть всю цепочку и проверять каждый адрес
     def redirect_request(self, *a, **k):
         return None
 
 
+# Только http и https: стандартный urllib умеет открывать file:// и ftp://, и чужой сайт мог бы
+# редиректом заставить скрипт прочитать локальный файл. Собираем открыватель без этих обработчиков.
+OPENER = urllib.request.OpenerDirector()
+for _h in (_HTTP(), _HTTPS(), urllib.request.ProxyHandler(), NoRedirect(),
+           urllib.request.HTTPErrorProcessor(), urllib.request.HTTPDefaultErrorHandler()):
+    OPENER.add_handler(_h)
+
+
+def decode(raw, charset):
+    try:
+        return raw.decode(charset or 'utf-8', 'replace')
+    except (LookupError, UnicodeError):   # неизвестная или «экзотическая» кодировка (idna, punycode…)
+        return raw.decode('utf-8', 'replace')
+
+
+def _read(r, limit):
+    """Читаем кусками и следим за общим временем: сервер, который отдаёт по байту, не подвесит проверку."""
+    buf = bytearray()
+    while len(buf) < limit:
+        if _left() <= 0:
+            break
+        chunk = r.read(min(65536, limit - len(buf)))
+        if not chunk:
+            break
+        buf += chunk
+    return bytes(buf)
+
+
 def fetch(url, follow=True, limit=600_000):
-    """Возвращает (status, final_url, headers, body_text, chain). chain — список (status, url) по прыжкам."""
-    opener = urllib.request.build_opener(NoRedirect, urllib.request.HTTPSHandler(context=ssl.create_default_context()))
+    """Возвращает (status, final_url, headers, body_text, chain). chain — список (status, url) по прыжкам.
+    Статус 0 — запрос не выполнен (сеть, SSL, запрещённая схема, внутренний адрес или кончилось время)."""
     chain, cur = [], url
     for _ in range(10):
+        parts = urllib.parse.urlsplit(cur)
+        if parts.scheme not in ('http', 'https') or not parts.hostname:
+            chain.append((0, cur))
+            return 0, cur, {}, 'адрес не http/https — не открываю', chain
+        if _left() <= 0:
+            chain.append((0, cur))
+            return 0, cur, {}, 'кончилось время на проверку', chain
+        # через прокси подключаемся к самому прокси, поэтому адрес назначения проверяем отдельно
+        if _via_proxy(cur) and parts.hostname not in TRUSTED:
+            try:
+                _resolve(parts.hostname, parts.port or 443)
+            except OSError as e:
+                chain.append((0, cur))
+                return 0, cur, {}, str(e), chain
         req = urllib.request.Request(cur, headers={'User-Agent': UA, 'Accept-Language': 'ru,en;q=0.8'})
         try:
-            r = opener.open(req, timeout=TIMEOUT)
-            body = r.read(limit).decode(r.headers.get_content_charset() or 'utf-8', 'replace')
+            r = OPENER.open(req, timeout=min(TIMEOUT, max(1, _left())))
+            with r:
+                body = decode(_read(r, limit), r.headers.get_content_charset())
             chain.append((r.status, cur))
             return r.status, cur, dict(r.headers), body, chain
         except urllib.error.HTTPError as e:
-            loc = e.headers.get('Location')
+            loc = e.headers.get('Location') if e.headers else None
             chain.append((e.code, cur))
             if e.code in (301, 302, 303, 307, 308) and loc and follow:
+                e.close()
                 cur = urllib.parse.urljoin(cur, loc)
                 continue
             body = ''
             try:
-                body = e.read(limit).decode('utf-8', 'replace')
+                body = decode(_read(e, limit), None)
             except Exception:
                 pass
+            finally:
+                e.close()
             return e.code, cur, dict(e.headers or {}), body, chain
-        except Exception as e:  # сеть, SSL, таймаут
+        except Exception as e:  # сеть, SSL, таймаут, внутренний адрес
             chain.append((0, cur))
             return 0, cur, {}, str(e), chain
-    return chain[-1][0], cur, {}, '', chain
+    return chain[-1][0], cur, {}, 'больше 10 редиректов', chain
 
 
 class Page(HTMLParser):
@@ -146,12 +263,19 @@ def ld_types(blocks):
     return sorted(types)
 
 
+def clean(text, limit=400):
+    """В отчёт попадают заголовки, адреса и заголовки ответов с чужого сайта. Убираем управляющие символы
+    (escape-последовательности могли бы менять терминал) и режем длину."""
+    text = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', str(text))
+    return text if len(text) <= limit else text[:limit] + '…'
+
+
 class Report:
     def __init__(self):
         self.items = []
 
     def add(self, group, level, text, fix=''):
-        self.items.append({'group': group, 'level': level, 'text': text, 'fix': fix})
+        self.items.append({'group': group, 'level': level, 'text': clean(text), 'fix': fix})
 
     def print(self, url):
         print(f'\nПроверка под Яндекс: {url}\n')
@@ -171,9 +295,14 @@ class Report:
 def check(url, indexnow_key=None):
     R = Report()
     p = urllib.parse.urlparse(url if '://' in url else 'https://' + url)
+    if p.scheme not in ('http', 'https') or not p.hostname:
+        sys.exit('Нужен адрес сайта вида https://example.ru')
     host = p.hostname
     bare = host[4:] if host.startswith('www.') else host
-    main = f'{p.scheme}://{host}/'
+    main = f'{p.scheme}://{p.netloc}/'
+    TRUSTED.clear(); TRUSTED.update({host} | _proxy_hosts())
+    DEADLINE[0] = time.monotonic() + BUDGET
+    is_ip = bool(re.fullmatch(r'[\d.]+|.*:.*', host))
 
     # ── Зеркала и редиректы
     G = 'Зеркала и редиректы'
@@ -192,7 +321,8 @@ def check(url, indexnow_key=None):
     else:
         R.add(G, OK if len(chain) == 1 else WARN, f'Главная: {" → ".join(f"{s} {u}" for s, u in chain)}',
               'главное зеркало должно открываться без редиректов')
-    variants = {f'http://{bare}/', f'http://www.{bare}/', f'https://www.{bare}/', f'https://{bare}/'} - {final}
+    # зеркала проверяем только у обычного домена без порта — у IP и стендов на порту их не бывает
+    variants = set() if (p.port or is_ip) else {f'http://{bare}/', f'http://www.{bare}/', f'https://www.{bare}/', f'https://{bare}/'} - {final}
     for v in sorted(variants):
         s, f, _, _, ch = fetch(v)
         hops = len(ch) - 1
@@ -234,21 +364,27 @@ def check(url, indexnow_key=None):
         R.add(G, BAD, f'robots.txt отдаёт {rs}', 'положи robots.txt в корень')
     else:
         low = robots.lower()
-        sitemaps = re.findall(r'(?im)^\s*sitemap:\s*(\S+)', robots)
+        lines = [ln.strip() for ln in robots.splitlines()[:5000]]
+        sitemaps = [ln.split(':', 1)[1].strip() for ln in lines if ln.lower().startswith('sitemap:')][:20]
         R.add(G, OK if sitemaps else WARN, f'Sitemap в robots.txt: {", ".join(sitemaps) or "нет"}', 'добавь строку Sitemap: https://…/sitemap.xml')
-        if re.search(r'(?im)^\s*host:', robots):
+        if any(ln.lower().startswith('host:') for ln in lines):
             R.add(G, WARN, 'Есть директива Host — Яндекс её не учитывает с 2018 года', 'убери Host, главное зеркало задаётся 301')
         if 'clean-param' in low:
             R.add(G, OK, 'Clean-param задан — служебные параметры склеиваются')
         else:
             R.add(G, WARN, 'Нет Clean-param — адреса с utm_* могут попадать в индекс как дубли',
                   'Clean-param: utm_source&utm_medium&utm_campaign&utm_content&utm_term')
-        blocks = re.split(r'(?im)^\s*user-agent:', robots)
-        for blk in blocks[1:]:
-            agent = blk.strip().splitlines()[0].strip().lower() if blk.strip() else ''
-            if agent in ('*', 'yandex') and re.search(r'(?im)^\s*disallow:\s*/\s*$', blk):
-                R.add(G, BAD, f'User-agent: {agent} — Disallow: / закрывает весь сайт', 'открой сайт для индексации')
-        if re.search(r'(?im)^\s*disallow:.*\.(css|js)\b', robots):
+        agent, closed = '', set()
+        for ln in lines:
+            key, _, val = ln.partition(':')
+            key, val = key.strip().lower(), val.strip()
+            if key == 'user-agent':
+                agent = val.lower()
+            elif key == 'disallow' and val == '/' and agent in ('*', 'yandex'):
+                closed.add(agent)
+        for agent in sorted(closed):
+            R.add(G, BAD, f'User-agent: {agent} — Disallow: / закрывает весь сайт', 'открой сайт для индексации')
+        if any(ln.lower().startswith('disallow:') and re.search(r'\.(css|js)\b', ln) for ln in lines):
             R.add(G, WARN, 'Закрыты CSS или JS — роботу сложнее отрендерить страницу', 'не закрывай стили и скрипты')
 
     # ── Главная: мета и разметка
@@ -296,14 +432,14 @@ def check(url, indexnow_key=None):
 
     # ── Коммерческие факторы (сигналы на главной)
     G = 'Коммерческие сигналы на главной'
-    raw = ' '.join(pg.text)
+    raw = ' '.join(pg.text)[:200_000]
     hrefs = ' '.join(pg.links).lower()
     sig = [
-        ('Телефон', bool(re.search(r'(\+7|8)[\s(-]*\d{3}[\s)-]*\d{3}[\s-]*\d{2}[\s-]*\d{2}', raw)) or 'tel:' in hrefs, 'телефон в шапке, ссылкой tel:'),
+        ('Телефон', bool(re.search(r'(\+7|8)[\s(-]{0,3}\d{3}[\s)-]{0,3}\d{3}[\s-]{0,2}\d{2}[\s-]{0,2}\d{2}', raw)) or 'tel:' in hrefs, 'телефон в шапке, ссылкой tel:'),
         ('Мессенджеры', bool(re.search(r't\.me/|wa\.me/|vk\.com/|max\.ru/', hrefs)), 'Telegram, WhatsApp, VK, MAX'),
-        ('Цены', bool(re.search(r'\d[\d\s]*\s?(₽|руб)', raw)), 'цены или «от» на главной и в услугах'),
+        ('Цены', bool(re.search(r'\d[\d \u00a0]{0,15}(₽|руб)', raw)), 'цены или «от» на главной и в услугах'),
         ('Реквизиты (ИНН/ОГРН)', bool(re.search(r'ИНН|ОГРН', raw)), 'реквизиты в подвале'),
-        ('Почта', bool(re.search(r'[\w.+-]+@[\w-]+\.[\w.]+', raw)) or 'mailto:' in hrefs, 'почта на сайте'),
+        ('Почта', bool(re.search(r'[\w.+-]{1,64}@[\w-]{1,63}\.[\w.]{2,63}', raw)) or 'mailto:' in hrefs, 'почта на сайте'),
         ('Политика конфиденциальности', bool(re.search(r'политик|privacy|konfiden|politika', hrefs + raw.lower())), 'ссылка на политику 152-ФЗ'),
         ('Страница контактов', bool(re.search(r'contact|kontakt|контакт', hrefs)), 'отдельная страница «Контакты»'),
     ]
@@ -317,7 +453,7 @@ def check(url, indexnow_key=None):
     if ss != 200:
         R.add(G, BAD, f'{sm_url} отдаёт {ss}', 'создай sitemap.xml и добавь в Вебмастер')
     else:
-        locs = re.findall(r'<loc>\s*([^<\s]+)\s*</loc>', sm)
+        locs = re.findall(r'<loc>\s*([^<\s]{1,2048})\s*</loc>', sm)[:50_000]
         is_index = '<sitemapindex' in sm
         R.add(G, OK if locs else WARN, f'{"Индекс sitemap" if is_index else "Адресов"}: {len(locs)}')
         lastmods = set(re.findall(r'<lastmod>([^<]+)</lastmod>', sm))
@@ -325,6 +461,11 @@ def check(url, indexnow_key=None):
             R.add(G, INFO, f'У всех адресов одинаковый lastmod ({next(iter(lastmods))})', 'ставь реальную дату изменения страницы')
         if not is_index:
             bad = []
+            site_hosts = {host, bare, 'www.' + bare, final_host}
+            foreign = [u for u in locs if urllib.parse.urlsplit(u).hostname not in site_hosts]
+            if foreign:
+                R.add(G, WARN, f'В sitemap {len(foreign)} адресов с чужих доменов, например {foreign[0]}', 'в sitemap только адреса своего сайта')
+            locs = [u for u in locs if u not in foreign]
             for u in locs[:20]:
                 s, f, _, b, ch = fetch(u)
                 if s != 200 or len(ch) > 1:
