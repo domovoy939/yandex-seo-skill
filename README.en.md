@@ -21,10 +21,10 @@ Tested on a live launch: mobile PageSpeed 24 → 95 in two days, soft 404s and J
 ## Install
 
 ```
-/plugin marketplace add OWNER/yandex-seo-skill
+/plugin marketplace add domovoy939/yandex-seo-skill
 /plugin install yandex-seo@yandex-seo
 ```
-or `npx skills add OWNER/yandex-seo-skill`, or `git clone … && ./install.sh`.
+or `npx skills add domovoy939/yandex-seo-skill`, or `git clone … && ./install.sh`.
 
 ## Commands
 

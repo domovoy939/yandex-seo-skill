@@ -12,18 +12,18 @@
 
 **Плагином Claude Code** (рекомендуется — появятся команды `/yandex`):
 ```
-/plugin marketplace add OWNER/yandex-seo-skill
+/plugin marketplace add domovoy939/yandex-seo-skill
 /plugin install yandex-seo@yandex-seo
 ```
 
 **Только скил:**
 ```bash
-npx skills add OWNER/yandex-seo-skill
+npx skills add domovoy939/yandex-seo-skill
 ```
 
 **Вручную:**
 ```bash
-git clone https://github.com/OWNER/yandex-seo-skill.git
+git clone https://github.com/domovoy939/yandex-seo-skill.git
 cd yandex-seo-skill && ./install.sh
 ```
 

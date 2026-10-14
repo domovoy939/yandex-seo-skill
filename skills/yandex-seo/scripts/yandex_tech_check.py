@@ -25,7 +25,7 @@ import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 
-UA = 'Mozilla/5.0 (compatible; yandex-seo-check/1.0; +https://github.com/OWNER/yandex-seo-skill)'
+UA = 'Mozilla/5.0 (compatible; yandex-seo-check/1.0; +https://github.com/domovoy939/yandex-seo-skill)'
 TIMEOUT = 20          # на одно соединение и одно чтение
 BUDGET = 150          # на всю проверку целиком, секунд — медленный сервер не растянет её на часы
 OK, WARN, BAD, INFO = 'ok', 'warn', 'bad', 'info'
